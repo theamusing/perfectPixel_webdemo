@@ -19,7 +19,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          # 移除了 cache: 'npm'，因为缺少 package-lock.json
 
       - name: Install dependencies
         run: npm install
@@ -28,11 +28,10 @@ jobs:
         run: npm run build
 
       - name: Add .nojekyll
-        # 这确保了 GitHub Pages 能够正确服务 assets 目录下的所有文件
         run: touch dist/.nojekyll
 
       - name: Deploy
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: dist # Vite 构建出的文件夹名称
-          branch: gh-pages # 部署到的目标分支
+          folder: dist
+          branch: gh-pages
