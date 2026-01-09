@@ -2,8 +2,8 @@
 import { NdArray, PerfectPixelOptions, PerfectPixelResult, DebugData } from '../types';
 import { createNdArray, ops, fft2d } from './ndarray-lite';
 
-function nextPow2(n: number): number {
-    return Math.pow(2, Math.ceil(Math.log2(n)));
+function nextPow2(n: number, max_val: number): number {
+    return Math.min(Math.pow(2, Math.ceil(Math.log2(n))), max_val);
 }
 
 /**
@@ -105,16 +105,16 @@ function sobelXy(gray: NdArray, ksize = 3): { gx: NdArray, gy: NdArray } {
 
 function computeFftMagnitude(grayImage: NdArray): NdArray {
     const [h, w] = grayImage.shape;
-    const ph = nextPow2(h);
-    const pw = nextPow2(w);
+    const ph = nextPow2(h, 1024);
+    const pw = nextPow2(w, 1024);
 
     const real = createNdArray(new Float32Array(ph * pw), [ph, pw]);
     const imag = createNdArray(new Float32Array(ph * pw), [ph, pw]);
     ops.assigns(real, 0);
     ops.assigns(imag, 0);
 
-    for (let i = 0; i < h; i++) {
-        for (let j = 0; j < w; j++) {
+    for (let i = 0; i < Math.min(h, ph); i++) {
+        for (let j = 0; j < Math.min(w,pw); j++) {
             real.set(i, j, grayImage.get(i, j));
         }
     }
@@ -139,26 +139,31 @@ function computeFftMagnitude(grayImage: NdArray): NdArray {
 }
 
 function smooth1d(v: Float32Array, k = 17): Float32Array {
-    if (k < 3) return v;
+    if (k < 3) return new Float32Array(v);
     if (k % 2 === 0) k += 1;
+
     const sigma = k / 6.0;
     const center = Math.floor(k / 2);
     const kernel = new Float32Array(k);
-    let sum = 0;
+    let kernelSum = 0;
 
     for (let i = 0; i < k; i++) {
         const x = i - center;
         kernel[i] = Math.exp(-(x * x) / (2 * sigma * sigma));
-        sum += kernel[i];
+        kernelSum += kernel[i];
     }
 
+    const normSum = kernelSum + 1e-8;
+
     const out = new Float32Array(v.length);
+
     for (let i = 0; i < v.length; i++) {
         let acc = 0;
         for (let j = 0; j < k; j++) {
-            let idx = i + j - center;
+            const idx = i + j - center;
+            
             if (idx >= 0 && idx < v.length) {
-                acc += v[idx] * (kernel[j] / (sum + 1e-8));
+                acc += v[idx] * (kernel[j] / normSum);
             }
         }
         out[i] = acc;
@@ -400,6 +405,37 @@ function refineGrids(image: NdArray, gridX: number, gridY: number): { xCoords: n
         y -= cellH;
     }
     console.log(xCoords.length, yCoords.length, W/cellW, H/cellH)
+    
+    // force square
+    if(Math.abs(xCoords.length - yCoords.length) < 2) {
+        if(xCoords.length % 2 === 0)
+        {
+            if(xCoords.length > yCoords.length)
+            {
+                xCoords.pop();
+            }
+            else if(xCoords.length < yCoords.length)
+            {
+                xCoords.push(0);
+            }
+            else
+            {
+                xCoords.push(0);
+                yCoords.push(0);
+            }
+        }
+        else
+        {
+            if(xCoords.length > yCoords.length)
+            {
+                yCoords.push(0);
+            }
+            else if(xCoords.length < yCoords.length)
+            {
+                yCoords.pop();
+            }
+        }
+    }
     return {
         xCoords: xCoords.sort((a, b) => a - b),
         yCoords: yCoords.sort((a, b) => a - b)
