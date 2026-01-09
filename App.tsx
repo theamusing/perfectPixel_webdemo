@@ -248,7 +248,7 @@ const App: React.FC = () => {
     <div className="max-w-6xl mx-auto px-4 py-12">
       <header className="text-center mb-12">
         <h1 className="text-4xl font-extrabold text-slate-800 mb-2 tracking-tight">PerfectPixel</h1>
-        <p className="text-slate-500">Restore sharp, pixel-perfect pixel art from distorted images.</p>
+        <p className="text-slate-500">Automatically detect pixel grids and restore sharp, pixel-perfect pixel art from distorted pixel-style images.</p>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch mb-8">
