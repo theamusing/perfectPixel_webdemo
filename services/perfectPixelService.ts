@@ -184,7 +184,7 @@ function detectPeak(proj: Float32Array, relThr = 0.35, minDist = 6): PeakDetecti
 
     if (mx < 1e-6) return null;
     const thr = mx * relThr;
-    const peakWidth = 8;
+    const peakWidth = 6;
     const candidates: Array<{ index: number, score: number }> = [];
 
     for (let i = 1; i < proj.length - 1; i++) {
