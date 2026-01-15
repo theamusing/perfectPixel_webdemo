@@ -364,7 +364,7 @@ function refineGrids(image: NdArray, gridX: number, gridY: number): { xCoords: n
     const cellH = H / gridY;
 
     const gray = rgbToGray(image);
-    const { gx, gy } = sobelXy(gray, 5);
+    const { gx, gy } = sobelXy(gray, 3);
 
     const gradXSum = new Float32Array(W);
     const gradYSum = new Float32Array(H);
@@ -404,7 +404,6 @@ function refineGrids(image: NdArray, gridX: number, gridY: number): { xCoords: n
         yCoords.push(y);
         y -= cellH;
     }
-    console.log(xCoords.length, yCoords.length, W/cellW, H/cellH)
     
     // force square
     if(Math.abs(xCoords.length - yCoords.length) < 2) {
@@ -440,6 +439,43 @@ function refineGrids(image: NdArray, gridX: number, gridY: number): { xCoords: n
         xCoords: xCoords.sort((a, b) => a - b),
         yCoords: yCoords.sort((a, b) => a - b)
     };
+}
+
+function getMedian(arr: number[]): number {
+    if (arr.length === 0) return 0;
+    const sorted = [...arr].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function estimateGridGradient(image: NdArray, relThr = 0.2): { scaleCol: number, scaleRow: number } | null {
+    const gray = rgbToGray(image);
+    const [H, W] = gray.shape;
+    const { gx, gy } = sobelXy(gray, 3);
+    const gXSum = new Float32Array(W), gYSum = new Float32Array(H);
+    for (let i = 0; i < H; i++) for (let j = 0; j < W; j++) { gXSum[j] += Math.abs(gx.get(i, j)); gYSum[i] += Math.abs(gy.get(i, j)); }
+
+    const findPeaks = (arr: Float32Array, thr: number) => {
+        const p: number[] = [];
+        for (let i = 1; i < arr.length - 1; i++) {
+            if (arr[i] > arr[i-1] && arr[i] > arr[i+1] && arr[i] >= thr) {
+                if (p.length === 0 || i - p[p.length-1] >= 4) p.push(i);
+            }
+        }
+        return p;
+    };
+
+    let mxX = 0; for (let v of gXSum) if (v > mxX) mxX = v;
+    let mxY = 0; for (let v of gYSum) if (v > mxY) mxY = v;
+    const pX = findPeaks(gXSum, mxX * relThr), pY = findPeaks(gYSum, mxY * relThr);
+    if (pX.length < 4 || pY.length < 4) return null;
+
+    const getIntv = (p: number[]) => {
+        const d: number[] = [];
+        for (let i = 1; i < p.length; i++) d.push(p[i] - p[i-1]);
+        return getMedian(d);
+    };
+    return { scaleCol: W / getIntv(pX), scaleRow: H / getIntv(pY) };
 }
 
 function estimateGridFft(image: NdArray): { scaleCol: number | null, scaleRow: number | null, peaksRow: [number, number] | null, peaksCol: [number, number] | null, smoothRow: Float32Array, smoothCol: Float32Array, mag: NdArray } {
@@ -484,48 +520,84 @@ function estimateGridFft(image: NdArray): { scaleCol: number | null, scaleRow: n
 }
 
 export function getPerfectPixel(image: NdArray, options: PerfectPixelOptions = {}): PerfectPixelResult {
-    const { sampleMethod = "center", gridSize = null, minSize = 3.0 } = options;
+    const { sampleMethod = "center", gridSize = null, minSize = 4.0 } = options;
     const [H, W] = image.shape;
 
-    let scaleCol: number | null, scaleRow: number | null;
+    let scaleCol: number | null = null;
+    let scaleRow: number | null = null;
     let debugData: DebugData | undefined;
 
-    const est = estimateGridFft(image);
-    scaleCol = est.scaleCol;
-    scaleRow = est.scaleRow;
-    
-    debugData = {
-        smoothRow: est.smoothRow,
-        smoothCol: est.smoothCol,
-        peakRow: est.scaleRow,
-        peakCol: est.scaleCol,
-        peaksRow: est.peaksRow,
-        peaksCol: est.peaksCol,
-        magData: est.mag.data,
-        magShape: est.mag.shape
-    };
-
     if (gridSize) {
-        scaleCol = W / gridSize[0];
-        scaleRow = H / gridSize[1];
+        scaleCol = gridSize[0];
+        scaleRow = gridSize[1];
     } else {
-        if (scaleCol === null || scaleRow === null || scaleCol <= 0) {
-            return { refinedW: null, refinedH: null, scaled: image, debugData };
+        const est = estimateGridFft(image);
+        debugData = {
+            smoothRow: est.smoothRow,
+            smoothCol: est.smoothCol,
+            peakRow: est.scaleRow,
+            peakCol: est.scaleCol,
+            peaksRow: est.peaksRow,
+            peaksCol: est.peaksCol,
+            magData: est.mag.data,
+            magShape: est.mag.shape
+        };
+
+        let fftSuccess = est.scaleCol !== null && est.scaleRow !== null && est.scaleCol > 0 && est.scaleRow > 0;
+        if (fftSuccess) {
+            const psx = W / (est.scaleCol as number);
+            const psy = H / (est.scaleRow as number);
+            const maxRatio = 1.5;
+            const maxPixelSize = 20.0;
+            const ratio = psx / psy;
+
+            if (Math.min(psx, psy) < minSize || Math.max(psx, psy) > maxPixelSize || ratio > maxRatio || (1.0 / ratio) > maxRatio) {
+                console.log("Inconsistent grid size detected (FFT-based), fallback to gradient-based method.");
+                fftSuccess = false;
+            } else {
+                scaleCol = est.scaleCol;
+                scaleRow = est.scaleRow;
+            }
+        }
+
+        if (!fftSuccess) {
+            const est2 = estimateGridGradient(image);
+            if (est2) {
+                scaleCol = est2.scaleCol;
+                scaleRow = est2.scaleRow;
+            } else {
+                console.log("Gradient-based grid estimation failed, using default 64x64.");
+                const pixelSize = Math.min(W / 64, H / 64);
+                scaleCol = W / pixelSize;
+                scaleRow = H / pixelSize;
+            }
+        }
+
+        // Final unify logic from snippet
+        if (scaleCol !== null && scaleRow !== null) {
+            const psx = W / scaleCol;
+            const psy = H / scaleRow;
+            const maxRatio = 1.5;
+            let finalPixelSize: number;
+            const ratio = psx / psy;
+
+            if (ratio > maxRatio || (1.0 / ratio) > maxRatio) {
+                finalPixelSize = Math.min(psx, psy);
+            } else {
+                finalPixelSize = (psx + psy) / 2.0;
+            }
+            
+            console.log(`Detected pixel size: ${finalPixelSize.toFixed(2)}`);
+            scaleCol = Math.round(W / finalPixelSize);
+            scaleRow = Math.round(H / finalPixelSize);
         }
     }
 
-    const pixelSizeX = W / (scaleCol as number);
-    const pixelSizeY = H / (scaleRow as number);
-    console.log(pixelSizeX, pixelSizeY)
-    const pixelSize = Math.min(pixelSizeX, pixelSizeY);
-    
-    if (pixelSize <= minSize) {
+    if (scaleCol === null || scaleRow === null || scaleCol <= 0 || scaleRow <= 0) {
         return { refinedW: null, refinedH: null, scaled: image, debugData };
     }
 
-    const sizeX = Math.round(scaleCol as number);
-    const sizeY = Math.round(scaleRow as number);
-    const { xCoords, yCoords } = refineGrids(image, sizeX, sizeY);
+    const { xCoords, yCoords } = refineGrids(image, scaleCol, scaleRow);
 
     const refinedW = xCoords.length - 1;
     const refinedH = yCoords.length - 1;
