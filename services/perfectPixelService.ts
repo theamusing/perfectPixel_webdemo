@@ -381,26 +381,26 @@ function refineGrids(image: NdArray, gridX: number, gridY: number): { xCoords: n
 
     let x = findBestGrid(W / 2, cellW, cellW, gradXSum);
     while (x < W + cellW / 2) {
-        x = findBestGrid(x, cellW / 4, cellW / 4, gradXSum);
+        x = findBestGrid(x, cellW / 3, cellW / 3, gradXSum);
         xCoords.push(x);
         x += cellW;
     }
     x = findBestGrid(W / 2, cellW, cellW, gradXSum) - cellW;
     while (x > -cellW/2 && xCoords.length <= W/cellW) {
-        x = findBestGrid(x, cellW / 4, cellW / 4, gradXSum);
+        x = findBestGrid(x, cellW / 3, cellW / 3, gradXSum);
         xCoords.push(x);
         x -= cellW;
     }
 
     let y = findBestGrid(H / 2, cellH, cellH, gradYSum);
     while (y < H + cellH/2) {
-        y = findBestGrid(y, cellH / 4, cellH / 4, gradYSum);
+        y = findBestGrid(y, cellH / 3, cellH / 3, gradYSum);
         yCoords.push(y);
         y += cellH;
     }
     y = findBestGrid(H / 2, cellH, cellH, gradYSum) - cellH;
     while (y > -cellH/2 && yCoords.length <= H/cellH) {
-        y = findBestGrid(y, cellH / 4, cellH / 4, gradYSum);
+        y = findBestGrid(y, cellH / 3, cellH / 3, gradYSum);
         yCoords.push(y);
         y -= cellH;
     }
@@ -566,8 +566,8 @@ export function getPerfectPixel(image: NdArray, options: PerfectPixelOptions = {
                 scaleCol = est2.scaleCol;
                 scaleRow = est2.scaleRow;
             } else {
-                console.log("Gradient-based grid estimation failed, using default 64x64.");
-                const pixelSize = Math.min(W / 64, H / 64);
+                console.log("Gradient-based grid estimation failed, using default size 8.");
+                const pixelSize = 8.0;
                 scaleCol = W / pixelSize;
                 scaleRow = H / pixelSize;
             }

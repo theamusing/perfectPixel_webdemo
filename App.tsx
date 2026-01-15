@@ -58,20 +58,54 @@ const App: React.FC = () => {
         img.onerror = () => reject(new Error("Failed to load image"));
       });
 
+      const maxDim = 1024;
+      const minThreshold = 128;
+      const targetMin = 512;
+      
+      let w = img.width;
+      let h = img.height;
+      let minSide = Math.min(w, h);
+      
+      // 1. Upscale if too small (low res pixel art)
+      // If short side < 128, expand by integer multiple k such that k * minSide > 512
+      if (minSide < minThreshold) {
+        const k = Math.ceil((targetMin + 1) / minSide);
+        w *= k;
+        h *= k;
+      }
+      
+      // 2. Downscale if too large (long side > 1024)
+      if (Math.max(w, h) > maxDim) {
+        const s = maxDim / Math.max(w, h);
+        w = Math.round(w * s);
+        h = Math.round(h * s);
+      } else {
+        w = Math.round(w);
+        h = Math.round(h);
+      }
+
+      const targetWidth = w;
+      const targetHeight = h;
+
       const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Could not create canvas context');
 
-      ctx.drawImage(img, 0, 0);
-      const imageData = ctx.getImageData(0, 0, img.width, img.height);
-      const data = new Float32Array(img.width * img.height * 4);
+      // Use nearest neighbor if we are upscaling for cleaner grid detection
+      if (targetWidth > img.width) {
+          ctx.imageSmoothingEnabled = false;
+      }
+
+      ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+      const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
+      const data = new Float32Array(targetWidth * targetHeight * 4);
       for (let i = 0; i < imageData.data.length; i++) {
         data[i] = imageData.data[i];
       }
 
-      const inputNd = createNdArray(data, [img.height, img.width, 4]);
+      const inputNd = createNdArray(data, [targetHeight, targetWidth, 4]);
       const result = getPerfectPixel(inputNd, { sampleMethod: samplingMethod });
 
       setDebugData(result.debugData || null);
@@ -82,22 +116,22 @@ const App: React.FC = () => {
 
       setRefinedSize({ w: result.refinedW, h: result.refinedH });
 
-      const [h, w, c] = result.scaled.shape;
+      const [resH, resW, resC] = result.scaled.shape;
       const outCanvas = document.createElement('canvas');
-      outCanvas.width = w;
-      outCanvas.height = h;
+      outCanvas.width = resW;
+      outCanvas.height = resH;
       const outCtx = outCanvas.getContext('2d');
       if (!outCtx) throw new Error('Could not create output canvas context');
 
-      const outImageData = outCtx.createImageData(w, h);
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const outIdx = (y * w + x) * 4;
-          if (c >= 3) {
+      const outImageData = outCtx.createImageData(resW, resH);
+      for (let y = 0; y < resH; y++) {
+        for (let x = 0; x < resW; x++) {
+          const outIdx = (y * resW + x) * 4;
+          if (resC >= 3) {
             outImageData.data[outIdx]     = result.scaled.get(y, x, 0);
             outImageData.data[outIdx + 1] = result.scaled.get(y, x, 1);
             outImageData.data[outIdx + 2] = result.scaled.get(y, x, 2);
-            outImageData.data[outIdx + 3] = (c === 4) ? result.scaled.get(y, x, 3) : 255;
+            outImageData.data[outIdx + 3] = (resC === 4) ? result.scaled.get(y, x, 3) : 255;
           } else {
             const val = result.scaled.get(y, x, 0);
             outImageData.data[outIdx]     = val;
