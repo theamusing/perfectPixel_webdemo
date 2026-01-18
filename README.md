@@ -1,20 +1,15 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Perfect Pixel Web Demo
 
-# Run and deploy your AI Studio app
+> **Auto detect and Get perfect Pixel art**
 
-This contains everything you need to run your app locally.
+<img src="assets/image.png" width="100%" />
 
-View your app in AI Studio: https://ai.studio/apps/drive/1dFAgbOSx7rAz_uU7pkY25DPNsGp9iNg0
+Standard scaling often fails to sample AI-generated pixel art due to inconsistent sizes and non-square grids. 
 
-## Run Locally
-
-**Prerequisites:**  Node.js
+This tool automatically detects the optimal grid and delivers perfectly aligned, pixel-perfect results.
 
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+**This is the official web demo of [perfect-pixel](https://github.com/theamusing/perfectPixel) library.**
+
+*built with google ai studio*
+

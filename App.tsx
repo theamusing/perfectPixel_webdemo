@@ -14,6 +14,7 @@ const App: React.FC = () => {
   const [refinedSize, setRefinedSize] = useState<{ w: number; h: number } | null>(null);
   const [debugData, setDebugData] = useState<DebugData | null>(null);
   const [showDebug, setShowDebug] = useState(false);
+  const [starCount, setStarCount] = useState<number | null>(null);
 
   // Pan states
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -25,6 +26,18 @@ const App: React.FC = () => {
   const magCanvasRef = useRef<HTMLCanvasElement>(null);
   const rowChartRef = useRef<HTMLCanvasElement>(null);
   const colChartRef = useRef<HTMLCanvasElement>(null);
+
+  // Fetch GitHub stars
+  useEffect(() => {
+    fetch('https://api.github.com/repos/theamusing/perfectPixel')
+      .then(res => res.json())
+      .then(data => {
+        if (data && typeof data.stargazers_count === 'number') {
+          setStarCount(data.stargazers_count);
+        }
+      })
+      .catch(err => console.error('Failed to fetch GitHub stars', err));
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -59,22 +72,21 @@ const App: React.FC = () => {
       });
 
       const maxDim = 1024;
-      const minThreshold = 128;
-      const targetMin = 512;
+      const minThreshold = 64;
+      const targetMin = 256;
       
       let w = img.width;
       let h = img.height;
       let minSide = Math.min(w, h);
       
-      // 1. Upscale if too small (low res pixel art)
-      // If short side < 128, expand by integer multiple k such that k * minSide > 512
+      // Upscale logic: If short side < 64, expand by integer multiple k such that k * minSide > 256
       if (minSide < minThreshold) {
         const k = Math.ceil((targetMin + 1) / minSide);
         w *= k;
         h *= k;
       }
       
-      // 2. Downscale if too large (long side > 1024)
+      // Downscale logic: If long side > 1024, scale down proportionally
       if (Math.max(w, h) > maxDim) {
         const s = maxDim / Math.max(w, h);
         w = Math.round(w * s);
@@ -84,34 +96,29 @@ const App: React.FC = () => {
         h = Math.round(h);
       }
 
-      const targetWidth = w;
-      const targetHeight = h;
-
       const canvas = document.createElement('canvas');
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
+      canvas.width = w;
+      canvas.height = h;
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('Could not create canvas context');
 
-      // Use nearest neighbor if we are upscaling for cleaner grid detection
-      if (targetWidth > img.width) {
-          ctx.imageSmoothingEnabled = false;
+      if (w > img.width) {
+          ctx.imageSmoothingEnabled = false; // Nearest neighbor for pixel art upscaling
       }
-
-      ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-      const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
-      const data = new Float32Array(targetWidth * targetHeight * 4);
+      ctx.drawImage(img, 0, 0, w, h);
+      const imageData = ctx.getImageData(0, 0, w, h);
+      const data = new Float32Array(w * h * 4);
       for (let i = 0; i < imageData.data.length; i++) {
         data[i] = imageData.data[i];
       }
 
-      const inputNd = createNdArray(data, [targetHeight, targetWidth, 4]);
+      const inputNd = createNdArray(data, [h, w, 4]);
       const result = getPerfectPixel(inputNd, { sampleMethod: samplingMethod });
 
       setDebugData(result.debugData || null);
 
       if (result.refinedW === null || result.refinedH === null) {
-        throw new Error('Failed to refine grid. The image might not have a clear pixel grid or it is too small.');
+        throw new Error('Failed to refine grid. Try a different sampling method or image.');
       }
 
       setRefinedSize({ w: result.refinedW, h: result.refinedH });
@@ -191,7 +198,6 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!showDebug || !debugData) return;
 
-    // Render Mag
     if (magCanvasRef.current && debugData.magData && debugData.magShape) {
       const [h, w] = debugData.magShape;
       const ctx = magCanvasRef.current.getContext('2d');
@@ -218,20 +224,8 @@ const App: React.FC = () => {
       const w = canvas.width = 400;
       const h = canvas.height = 100;
       ctx.clearRect(0, 0, w, h);
-      
-      // Draw background
       ctx.fillStyle = '#f8fafc';
       ctx.fillRect(0, 0, w, h);
-      
-      // Draw Grid
-      ctx.strokeStyle = '#e2e8f0';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for(let i=0; i<w; i+=40) { ctx.moveTo(i, 0); ctx.lineTo(i, h); }
-      for(let i=0; i<h; i+=20) { ctx.moveTo(0, i); ctx.lineTo(w, i); }
-      ctx.stroke();
-
-      // Draw Data
       ctx.strokeStyle = '#6366f1';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
@@ -242,51 +236,47 @@ const App: React.FC = () => {
         else ctx.lineTo(x, y);
       }
       ctx.stroke();
-
-      // Draw Peaks
       if (peaks) {
         ctx.strokeStyle = '#f43f5e';
-        ctx.setLineDash([4, 2]);
-        ctx.lineWidth = 1.5;
-
-        peaks.forEach(idx => {
-            const px = (idx / data.length) * w;
-            ctx.beginPath();
-            ctx.moveTo(px, 0);
-            ctx.lineTo(px, h);
-            ctx.stroke();
-
-            // Draw dot on peak
-            const py = h - (data[idx] * h);
-            ctx.fillStyle = '#f43f5e';
-            ctx.beginPath();
-            ctx.arc(px, py, 3, 0, Math.PI * 2);
-            ctx.fill();
+        ctx.lineWidth = 1;
+        peaks.forEach(p => {
+          const x = (p / data.length) * w;
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
         });
-        
-        ctx.setLineDash([]);
-        if (period !== null) {
-            ctx.fillStyle = '#f43f5e';
-            ctx.font = 'bold 10px monospace';
-            ctx.fillText(`Period: ${period.toFixed(1)}px`, w / 2 - 40, 15);
-        }
       }
     };
 
     drawChart(rowChartRef.current, debugData.smoothRow, debugData.peakRow, debugData.peaksRow || null);
     drawChart(colChartRef.current, debugData.smoothCol, debugData.peakCol, debugData.peaksCol || null);
-
   }, [showDebug, debugData]);
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-12">
+    <div className="max-w-6xl mx-auto px-4 py-12 relative">
+      {/* GitHub Button in the corner */}
+      <a 
+        href="https://github.com/theamusing/perfectPixel" 
+        target="_blank" 
+        rel="noopener noreferrer"
+        className="fixed top-6 right-6 z-50 flex items-center gap-2 bg-white/90 backdrop-blur border border-slate-200 shadow-lg rounded-full px-4 py-2 hover:bg-slate-50 transition-all hover:scale-105 active:scale-95"
+      >
+        <svg height="20" width="20" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+        </svg>
+        <span className="font-semibold text-slate-700 text-sm">GitHub</span>
+        {starCount !== null && (
+          <span className="bg-slate-100 px-2 py-0.5 rounded text-xs font-mono text-indigo-600 border border-slate-200">
+            ★{starCount}
+          </span>
+        )}
+      </a>
+
       <header className="text-center mb-12">
         <h1 className="text-4xl font-extrabold text-slate-800 mb-2 tracking-tight">PerfectPixel</h1>
         <p className="text-slate-500">Automatically detect pixel grids and restore sharp, pixel-perfect pixel art from distorted pixel-style images.</p>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch mb-8">
-        {/* Left: Input */}
+        {/* Left Card: Input */}
         <div className="bg-white rounded-2xl shadow-xl p-6 border border-slate-100 flex flex-col">
           <h2 className="text-xl font-bold text-slate-700 mb-4 flex items-center">
             <span className="w-2 h-6 bg-indigo-500 rounded-full mr-3"></span>
@@ -321,7 +311,7 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Right: Output */}
+        {/* Right Card: Output */}
         <div className="bg-white rounded-2xl shadow-xl p-6 border border-slate-100 flex flex-col">
           <h2 className="text-xl font-bold text-slate-700 mb-4 flex items-center">
             <span className="w-2 h-6 bg-teal-500 rounded-full mr-3"></span>
@@ -363,7 +353,6 @@ const App: React.FC = () => {
               <p className="text-slate-400 italic">No output yet</p>
             )}
 
-            {/* Scale Info Overlay */}
             {processedImage && refinedSize && (
               <div className="absolute top-4 right-4 bg-slate-800/80 backdrop-blur-md text-white px-3 py-1.5 rounded-lg text-xs font-mono z-10 pointer-events-none shadow-lg">
                 Grid: {refinedSize.w} × {refinedSize.h} | View: {Math.round(refinedSize.w * downloadScale)} × {Math.round(refinedSize.h * downloadScale)}
@@ -386,7 +375,7 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Debug Section */}
+      {/* Debug View */}
       <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
         <button 
           onClick={() => setShowDebug(!showDebug)} 
@@ -394,7 +383,7 @@ const App: React.FC = () => {
         >
           <div className="flex items-center">
             <span className="w-2 h-6 bg-slate-400 rounded-full mr-3"></span>
-            <span className="font-bold text-lg">Diagnostics & FFT Data</span>
+            <span className="font-bold text-lg">Diagnostics & Grid Analysis</span>
           </div>
           <span className="text-sm text-slate-400">{showDebug ? 'Hide' : 'Show'} details</span>
         </button>
@@ -411,13 +400,13 @@ const App: React.FC = () => {
                 </div>
                 <div className="md:col-span-2 space-y-6">
                   <div>
-                    <h3 className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Row Projection (Vertical Periodicity)</h3>
+                    <h3 className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Vertical Periodicity</h3>
                     <div className="bg-white rounded-lg p-2 border border-slate-200 overflow-hidden">
                       <canvas ref={rowChartRef} className="w-full h-[100px]" />
                     </div>
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Column Projection (Horizontal Periodicity)</h3>
+                    <h3 className="text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Horizontal Periodicity</h3>
                     <div className="bg-white rounded-lg p-2 border border-slate-200 overflow-hidden">
                       <canvas ref={colChartRef} className="w-full h-[100px]" />
                     </div>
@@ -426,7 +415,7 @@ const App: React.FC = () => {
               </div>
             ) : (
               <div className="text-center py-12 text-slate-400 italic">
-                Process an image to view diagnostic data
+                Process an image to view analysis data
               </div>
             )}
           </div>
